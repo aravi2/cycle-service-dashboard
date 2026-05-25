@@ -1,0 +1,1615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PJM GI Service Request Status Viewer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           background: #f1f5f9; color: #1e293b; font-size: 13px; min-height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      background: #0f172a; color: white; padding: 0 24px;
+      display: flex; align-items: center; gap: 14px; height: 54px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.4); position: sticky; top: 0; z-index: 100;
+    }
+    .logo { font-size: 15px; font-weight: 700; white-space: nowrap; }
+    .logo span { color: #60a5fa; }
+    .logo sub { font-size: 9px; color: #94a3b8; display: block; font-weight: 400; margin-top: -2px; }
+    .h-spacer { flex: 1; }
+    .upload-btn {
+      background: #2563eb; color: white; border: none; border-radius: 6px;
+      padding: 8px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; gap: 6px; transition: background .15s;
+    }
+    .upload-btn:hover { background: #1d4ed8; }
+    .upload-btn.serial { background: #7c3aed; }
+    .upload-btn.serial:hover { background: #6d28d9; }
+    .upload-btn.loaded { position: relative; }
+    .upload-btn.loaded::after {
+      content: '✓'; position: absolute; top: -5px; right: -5px;
+      background: #22c55e; color: white; border-radius: 50%;
+      width: 14px; height: 14px; font-size: 9px; font-weight: 900;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .file-grp { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+    .file-lbl { color: #94a3b8; font-size: 10px; max-width: 160px;
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-lbl.loaded { color: #86efac; }
+
+    /* ── Controls (cycle only) ── */
+    .controls {
+      background: white; border-bottom: 1px solid #e2e8f0;
+      padding: 10px 24px; display: flex; align-items: center; gap: 14px;
+      flex-wrap: wrap; position: sticky; top: 54px; z-index: 90;
+    }
+    .ctrl-grp { display: flex; align-items: center; gap: 8px; }
+    .ctrl-lbl {
+      font-size: 10px; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+    }
+    .cyc-btn {
+      padding: 5px 14px; border-radius: 20px; border: 1.5px solid #e2e8f0;
+      font-size: 12px; font-weight: 600; cursor: pointer; background: white;
+      color: #475569; transition: all .15s;
+    }
+    .cyc-btn:hover { border-color: #2563eb; color: #2563eb; }
+    .cyc-btn.on { background: #2563eb; color: white; border-color: #2563eb; }
+    .ctrl-sel {
+      border: 1.5px solid #e2e8f0; border-radius: 6px; padding: 5px 10px;
+      font-size: 12px; color: #374151; background: white; cursor: pointer; outline: none;
+    }
+    .ctrl-sel:focus { border-color: #2563eb; }
+    .ctrl-sep { width: 1px; height: 26px; background: #e2e8f0; }
+
+    /* ── Tabs ── */
+    .tab-nav {
+      background: white; border-bottom: 2px solid #e2e8f0;
+      padding: 0 24px; display: flex; position: sticky; top: 101px; z-index: 80;
+    }
+    .tab-btn {
+      padding: 13px 20px; font-size: 13px; font-weight: 500; cursor: pointer;
+      border: none; background: none; color: #64748b;
+      border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s;
+      white-space: nowrap;
+    }
+    .tab-btn:hover { color: #1e293b; }
+    .tab-btn.on { color: #2563eb; border-bottom-color: #2563eb; font-weight: 700; }
+    #focus-tab-btn.on { color: #1d4ed8; border-bottom-color: #1d4ed8; }
+
+    /* ── Content ── */
+    .content { padding: 20px 24px; max-width: 1400px; }
+    .tab-pane { display: none; }
+    .tab-pane.on { display: block; }
+
+    /* ── Cards / Grids ── */
+    .card {
+      background: white; border-radius: 10px; padding: 18px;
+      border: 1px solid #e2e8f0; margin-bottom: 14px;
+    }
+    .card-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; flex-wrap: wrap; gap: 8px; }
+    .card-title { font-size: 13px; font-weight: 700; color: #1e293b; }
+    .card-sub { font-size: 11px; color: #94a3b8; margin-bottom: 12px; }
+    .g2  { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .g3  { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .g12 { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; margin-bottom: 14px; }
+    .g5  { display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; margin-bottom: 14px; }
+    .g6  { display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; margin-bottom: 14px; }
+
+    /* ── Toggle buttons ── */
+    .tgl-grp { display: flex; border: 1.5px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
+    .tgl {
+      padding: 4px 11px; font-size: 11px; font-weight: 600; cursor: pointer;
+      background: white; border: none; color: #64748b; transition: all .12s;
+      border-right: 1px solid #e2e8f0;
+    }
+    .tgl:last-child { border-right: none; }
+    .tgl:hover { background: #f8fafc; color: #1e293b; }
+    .tgl.on { background: #2563eb; color: white; }
+    .tgl-sep { width: 6px; }
+
+    /* ── TO Focus banner ── */
+    .to-banner {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px;
+      padding: 12px 18px; margin-bottom: 14px;
+    }
+    .to-banner-label { font-size: 12px; font-weight: 700; color: #1d4ed8; white-space: nowrap; }
+    .to-banner-sel {
+      border: 1.5px solid #93c5fd; border-radius: 6px; padding: 6px 12px;
+      font-size: 13px; font-weight: 700; color: #1d4ed8; background: white;
+      cursor: pointer; outline: none; min-width: 160px;
+    }
+    .to-banner-sel:focus { border-color: #2563eb; }
+    .to-banner-hint { font-size: 11px; color: #64748b; }
+
+    /* ── KPI Cards ── */
+    .kpi {
+      background: white; border-radius: 10px; padding: 16px 18px;
+      border: 1px solid #e2e8f0; transition: box-shadow .15s;
+    }
+    .kpi:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    .kpi.focused { border-left: 3px solid #2563eb; }
+    .kv { font-size: 26px; font-weight: 800; line-height: 1.1; }
+    .kt { font-size: 11px; color: #64748b; font-weight: 500; margin-top: 3px; }
+    .ks { font-size: 10px; font-weight: 600; margin-top: 5px; }
+    .kbar { height: 3px; background: #f1f5f9; border-radius: 2px; margin-top: 9px; overflow: hidden; }
+    .kbar-f { height: 100%; border-radius: 2px; transition: width .4s; }
+    .cg{color:#16a34a} .cr{color:#dc2626} .cb{color:#2563eb}
+    .ca{color:#d97706} .cp{color:#7c3aed} .cs{color:#475569}
+
+    /* ── Pipeline ── */
+    .pipeline-scroll { overflow-x: auto; padding-bottom: 8px; }
+    .pipeline { display: flex; align-items: flex-start; min-width: 760px; padding: 10px 4px; }
+    .p-col { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; min-width: 72px; }
+    .p-line { position: absolute; top: 22px; left: 50%; right: -50%; height: 2px; background: #e2e8f0; z-index: 0; }
+    .p-col:last-child .p-line { display: none; }
+    .p-node {
+      width: 44px; height: 44px; border-radius: 50%; display: flex;
+      align-items: center; justify-content: center; font-size: 16px;
+      position: relative; z-index: 1; border: 2px solid transparent;
+      box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    }
+    .p-app   { background: #f8fafc; border-color: #cbd5e1; }
+    .p-study { background: #dbeafe; border-color: #93c5fd; }
+    .p-dp    { background: #f3e8ff; border-color: #d8b4fe; }
+    .p-final { background: #fef3c7; border-color: #fde68a; }
+    .p-name  { font-size: 9px; font-weight: 700; color: #475569; text-align: center; margin-top: 7px; line-height: 1.35; max-width: 68px; }
+    .p-stats { font-size: 9px; text-align: center; margin-top: 3px; line-height: 1.6; }
+    .p-active{ color: #16a34a; font-weight: 700; }
+    .p-epuc  { color: #d97706; font-weight: 700; }
+    .p-wd    { color: #dc2626; }
+
+    /* ── Pipeline legend ── */
+    .pip-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+    .pip-li { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #64748b; }
+    .pip-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid; flex-shrink: 0; }
+
+    /* ── Comparison ── */
+    .cmp-hdr { display: grid; grid-template-columns: 1fr 80px 80px 90px; gap:6px; padding:4px 6px; font-size:10px; font-weight:700; color:#94a3b8; border-bottom:1px solid #f1f5f9; margin-bottom:2px; }
+    .cmp-row { display: grid; grid-template-columns: 1fr 80px 80px 90px; gap:6px; padding:8px 6px; border-bottom:1px solid #f8fafc; align-items:center; }
+    .cmp-row:last-child { border-bottom: none; }
+    .cmp-metric { font-size: 12px; color: #475569; }
+    .cmp-dom { font-size: 16px; font-weight: 800; color: #1d4ed8; text-align: center; }
+    .cmp-avg { font-size: 13px; color: #94a3b8; text-align: center; }
+    .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 10px; font-weight: 700; text-align: center; }
+    .b-up { background: #dcfce7; color: #166534; }
+    .b-dn { background: #fee2e2; color: #991b1b; }
+    .b-eq { background: #f1f5f9; color: #64748b; }
+
+    /* ── Progress bars ── */
+    .prog-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .prog-lbl { font-size: 11px; color: #475569; width: 140px; flex-shrink: 0; }
+    .prog-wrap { flex: 1; height: 10px; background: #f1f5f9; border-radius: 5px; overflow: hidden; }
+    .prog-fill { height: 100%; border-radius: 5px; transition: width .5s; }
+    .prog-val { font-size: 11px; color: #475569; width: 90px; text-align: right; white-space: nowrap; }
+
+    /* ── Heatmap ── */
+
+    /* ── Project Table ── */
+    .tbl-wrap { overflow: auto; max-height: 480px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    thead th { position: sticky; top: 0; background: #f8fafc; font-weight: 700; padding: 9px 10px; text-align: left; border-bottom: 2px solid #e2e8f0; color: #475569; white-space: nowrap; user-select: none; cursor: pointer; }
+    thead th:hover { background: #f1f5f9; }
+    tbody tr { border-bottom: 1px solid #f8fafc; }
+    tbody tr:hover td { background: #f8fafc; }
+    tbody tr.focus-row { background: #eff6ff; }
+    tbody tr.focus-row:hover td { background: #dbeafe !important; }
+    tbody td { padding: 7px 10px; }
+    .sp { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+    .sp-Active{background:#dcfce7;color:#166534} .sp-EP{background:#fef3c7;color:#92400e}
+    .sp-UC{background:#ede9fe;color:#5b21b6} .sp-UC-ISP{background:#e0f2fe;color:#075985}
+    .sp-Withdrawn{background:#fee2e2;color:#991b1b}
+    .sp-InService{background:#d1fae5;color:#065f46} .sp-Suspended{background:#f1f5f9;color:#475569}
+    .srch { border: 1.5px solid #e2e8f0; border-radius: 6px; padding: 7px 12px; font-size: 12px; width: 260px; outline: none; transition: border-color .15s; }
+    .srch:focus { border-color: #2563eb; }
+
+    /* ── Empty state ── */
+    .empty { text-align: center; padding: 80px 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .empty-icon { font-size: 52px; }
+    .empty-title { font-size: 18px; font-weight: 700; color: #64748b; }
+    .empty-sub { font-size: 13px; color: #94a3b8; max-width: 360px; }
+    .empty-hint { background: #f8fafc; border: 1.5px dashed #e2e8f0; border-radius: 10px; padding: 14px 24px; font-size: 12px; color: #94a3b8; }
+
+    /* ── Misc ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .chart-wrap { position: relative; }
+    .no-data { text-align: center; padding: 30px; color: #94a3b8; font-size: 12px; }
+    .tbl-filters { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+    @media (max-width: 900px) {
+      .g5 { grid-template-columns: repeat(3,1fr); }
+      .g2, .g3, .g12 { grid-template-columns: 1fr; }
+    }
+
+    /* ── Info tooltip ── */
+    .info-tip {
+      display: inline-flex; align-items: center; justify-content: center;
+      position: relative; cursor: help;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #e2e8f0; color: #64748b;
+      font-size: 9px; font-weight: 900; font-style: normal;
+      margin-left: 6px; vertical-align: middle; flex-shrink: 0;
+      transition: background .15s, color .15s;
+    }
+    .info-tip:hover { background: #2563eb; color: white; }
+    .info-tip .tip-popup {
+      display: none; position: absolute;
+      bottom: calc(100% + 7px); left: 50%;
+      transform: translateX(-50%);
+      background: #1e293b; color: #f1f5f9;
+      font-size: 11px; font-weight: 400; font-style: normal;
+      padding: 9px 13px; border-radius: 8px;
+      width: 230px; white-space: normal; line-height: 1.55;
+      z-index: 1001; box-shadow: 0 6px 20px rgba(0,0,0,.28);
+      pointer-events: none; text-align: left;
+    }
+    .info-tip:hover .tip-popup { display: block; }
+    .info-tip .tip-popup::after {
+      content: ''; position: absolute; top: 100%; left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent; border-top-color: #1e293b;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════ HEADER -->
+<header>
+  <div class="logo">
+    PJM <span>GI Service Request</span> Status Viewer
+    <sub>Cycle + Serial Interconnection Queue Tracker</sub>
+  </div>
+  <div class="h-spacer"></div>
+  <div class="file-grp">
+    <span class="file-lbl" id="file-lbl-cycle">No cycle file</span>
+    <span class="file-lbl" id="file-lbl-serial">No serial file</span>
+  </div>
+  <button class="upload-btn" id="btn-cycle" onclick="document.getElementById('fi-cycle').click()">📂 Load Cycle Excel</button>
+  <button class="upload-btn serial" id="btn-serial" onclick="document.getElementById('fi-serial').click()">📂 Load Serial Excel</button>
+  <input type="file" id="fi-cycle"  accept=".xlsx,.xls" style="display:none">
+  <input type="file" id="fi-serial" accept=".xlsx,.xls" style="display:none">
+</header>
+
+<!-- ═══════════════════════════════════════════════ CONTROLS — Queue selector -->
+<div class="controls" id="ctrl-bar" style="display:none">
+  <div class="ctrl-grp">
+    <span class="ctrl-lbl">QUEUE</span>
+    <div id="cyc-btns" style="display:flex;gap:6px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ TABS -->
+<div class="tab-nav" id="tab-nav" style="display:none">
+  <button class="tab-btn on"      onclick="swTab('gi-queue',this)">🌐 GI Queue Overview</button>
+  <button class="tab-btn"         onclick="swTab('overview',this)">📊 Cycle Overview</button>
+  <button class="tab-btn" id="focus-tab-btn" onclick="swTab('focus',this)">🏢 TO Focus</button>
+  <button class="tab-btn"         onclick="swTab('compare',this)">⚖️ TO Comparison</button>
+  <button class="tab-btn"         onclick="swTab('projects',this)">📋 Project Table</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════ CONTENT -->
+<div class="content">
+
+  <!-- Empty state -->
+  <div id="empty-state">
+    <div class="empty">
+      <div class="empty-icon">📂</div>
+      <div class="empty-title">Load PJM Queue Data</div>
+      <div class="empty-sub">Load one or both files to see a holistic view of the generation interconnection queue.</div>
+      <div class="empty-hint" style="text-align:left;max-width:500px">
+        <strong>📂 Load Cycle Excel</strong> — CycleProjects export from the Cycle Service Request Status page (TC1, TC2 …)<br><br>
+        <strong>📂 Load Serial Excel</strong> — PlanningQueues export from the Serial Service Request Status page (Expedited queue)<br><br>
+        Load both together to see combined UC, EP, Active counts across all queues.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TAB: Cycle Overview ═══ -->
+  <div class="tab-pane" id="tab-overview">
+    <div class="g5" id="kpi-ov"></div>
+
+    <!-- Serial note — shown only when serial data is in view -->
+    <div id="card-serial-note" class="card" style="display:none;background:#faf5ff;border-color:#d8b4fe">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">⚡</span>
+        <div>
+          <div class="card-title" style="color:#7c3aed">Expedited Queue (Serial Service) — Combined View</div>
+          <div class="card-sub">Showing TC1 + TC2 (Cycle file) + Expedited AE1-AG1 projects (Serial file). "Moved to TC1/TC2" and AH2+ obsolete projects are excluded to avoid double-counting. Pipeline and funnel views are available under the TC1 / TC2 cycle buttons.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pipeline -->
+    <div id="card-pipeline" class="card">
+      <div class="card-title">Interconnection Cycle Pipeline <span class="info-tip">i<span class="tip-popup">Maps the PJM Manual H study process. Each node shows Active, EP/UC, and Withdrawn project counts at that stage. Study phases (🔬) alternate with Decision Points (🔀) where developers choose to continue or exit.</span></span></div>
+      <div class="card-sub">PJM Manual H process flow · Study phases (🔬) alternate with Decision Points (🔀)</div>
+      <div class="pip-legend">
+        <div class="pip-li"><div class="pip-dot" style="background:#f8fafc;border-color:#cbd5e1"></div>Application</div>
+        <div class="pip-li"><div class="pip-dot" style="background:#dbeafe;border-color:#93c5fd"></div>Study Phase (SIS)</div>
+        <div class="pip-li"><div class="pip-dot" style="background:#f3e8ff;border-color:#d8b4fe"></div>Decision Point (DP)</div>
+        <div class="pip-li"><div class="pip-dot" style="background:#fef3c7;border-color:#fde68a"></div>Final Agreement</div>
+        <div class="pip-li"><span style="color:#16a34a;font-weight:700;font-size:13px">■</span>&nbsp;Active / EP / UC</div>
+        <div class="pip-li"><span style="color:#dc2626;font-weight:700;font-size:13px">■</span>&nbsp;Withdrawn</div>
+      </div>
+      <div class="pipeline-scroll"><div class="pipeline" id="pipeline"></div></div>
+    </div><!-- /card-pipeline -->
+
+    <!-- Status + Fuel row -->
+    <div class="g2">
+      <!-- Status donut -->
+      <div class="card">
+        <div class="card-title">Project Status Distribution <span class="info-tip">i<span class="tip-popup">Breakdown of projects by current PJM status. Helps identify how many projects are advancing vs. stalled or withdrawn in the selected queue view.</span></span></div>
+        <div class="card-sub">Count and percentage of projects by current status</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch-status"></canvas></div>
+      </div>
+
+      <!-- Fuel mix with MWE/MWC toggle only -->
+      <div class="card">
+        <div class="card-hdr">
+          <div>
+            <div class="card-title">Fuel Mix — Active + EP/UC Projects <span class="info-tip">i<span class="tip-popup">MW Energy (or Capacity) of progressing projects grouped into six fuel categories. Only includes Active, EP, and UC projects — withdrawn projects are excluded. Toggle between MW Energy and MW Capacity above.</span></span></div>
+            <div class="card-sub" id="fuel-sub" style="margin-bottom:0">MW Energy of progressing projects by fuel type</div>
+          </div>
+          <div class="tgl-grp">
+            <button class="tgl on" id="fuel-mwe-btn" onclick="setFuelMetric('mwe')">MW Energy</button>
+            <button class="tgl"    id="fuel-mwc-btn" onclick="setFuelMetric('mwc')">MW Capacity</button>
+          </div>
+        </div>
+        <div style="height:12px"></div>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch-fuel-ov"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Funnel + Withdrawals row -->
+    <div class="g2" id="card-funnel">
+      <div class="card">
+        <div class="card-title">Stage Attrition Funnel <span class="info-tip">i<span class="tip-popup">Cumulative count of projects that reached each PJM study stage or beyond. A narrowing bar reveals how many projects exit at each stage — the steeper the drop, the higher the attrition.</span></span></div>
+        <div class="card-sub">Total projects that reached each stage or beyond</div>
+        <div class="chart-wrap" style="height:200px"><canvas id="ch-funnel"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Withdrawal Reasons <span class="info-tip">i<span class="tip-popup">Top 7 reasons projects exited the interconnection queue, sourced from PJM's Withdrawal Remarks field. Useful for understanding systemic barriers in the queue process.</span></span></div>
+        <div class="card-sub">Why projects exited the queue</div>
+        <div class="chart-wrap" style="height:200px"><canvas id="ch-wd-reasons"></canvas></div>
+      </div>
+    </div>
+  </div><!-- /tab-overview -->
+
+  <!-- ═══ TAB: GI Queue Overview ═══ -->
+  <div class="tab-pane on" id="tab-gi-queue">
+    <div class="g6" id="kpi-gi"></div>
+
+    <!-- Portfolio Evolution Fuel Mix — single card with shared toggle -->
+    <div class="card">
+      <div class="card-hdr">
+        <div>
+          <div class="card-title">Portfolio Evolution — Fuel Mix <span class="info-tip">i<span class="tip-popup">Three progressive snapshots of the PJM-wide generation fuel mix across all loaded queues. Each chart adds a layer of the pipeline to show how the mix shifts from today's operations toward the full potential build-out.</span></span></div>
+          <div class="card-sub" style="margin-bottom:0">How the generation mix evolves from current operations through the full committed pipeline</div>
+        </div>
+        <div class="tgl-grp">
+          <button class="tgl on" id="gi-fuel-mwe-btn" onclick="setGIFuelMetric('mwe')">MW Energy</button>
+          <button class="tgl"    id="gi-fuel-mwc-btn" onclick="setGIFuelMetric('mwc')">MW Capacity</button>
+        </div>
+      </div>
+      <div style="height:12px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#10b981;margin-bottom:4px">🟢 In-Service Generators <span class="info-tip">i<span class="tip-popup">Fuel mix of generators that have achieved commercial operation. This represents the actual installed base currently generating electricity on the PJM grid.</span></span></div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:10px">Current operational fleet</div>
+          <div class="chart-wrap" style="height:260px"><canvas id="ch-gi-fuel-is"></canvas><div id="ch-gi-fuel-is-nd" class="no-data" style="display:none">No In-Service data</div></div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#f59e0b;margin-bottom:4px">🔶 In Service + EP + UC <span class="info-tip">i<span class="tip-popup">Adds projects with executed Engineering &amp; Procurement agreements and those Under Construction — near-certain additions to the fleet within the next few years.</span></span></div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:10px">Near-term committed pipeline</div>
+          <div class="chart-wrap" style="height:260px"><canvas id="ch-gi-fuel-prog"></canvas><div id="ch-gi-fuel-prog-nd" class="no-data" style="display:none">No data</div></div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#2563eb;margin-bottom:4px">🔵 Full Potential Portfolio <span class="info-tip">i<span class="tip-popup">Adds all Active (In Study) projects to the committed pipeline — shows the theoretical maximum fuel mix if every project in the queue successfully reaches commercial operation.</span></span></div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:10px">In Service + EP + UC + Active</div>
+          <div class="chart-wrap" style="height:260px"><canvas id="ch-gi-fuel-all"></canvas><div id="ch-gi-fuel-all-nd" class="no-data" style="display:none">No data</div></div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /tab-gi-queue -->
+
+  <!-- ═══ TAB: TO Focus ═══ -->
+  <div class="tab-pane" id="tab-focus">
+    <!-- TO selector banner -->
+    <div class="to-banner">
+      <span class="to-banner-label">🏢 Focused Transmission Owner</span>
+      <select class="to-banner-sel" id="focus-to-sel" onchange="setFocusTO(this.value)">
+        <option value="">— select a TO —</option>
+      </select>
+      <span class="to-banner-hint">Select a TO · Cycle-only charts use the cycle file · Combined charts include serial (Legacy + Expedited) queue</span>
+    </div>
+
+    <div class="g6" id="kpi-focus"></div>
+
+    <!-- Row 1: Fuel Mix (cycle+serial) | Cycle Stage Breakdown -->
+    <div class="g2">
+      <div class="card">
+        <div class="card-hdr">
+          <div>
+            <div class="card-title" id="fuel-title">Fuel Mix — Active + EP/UC</div>
+            <div class="card-sub" id="focus-fuel-sub" style="margin-bottom:0">Cycle + Serial · MW Energy of active + EP/UC projects</div>
+          </div>
+          <div class="tgl-grp">
+            <button class="tgl on" id="focus-fuel-mwe-btn" onclick="setFocusFuelMetric('mwe')">MW Energy</button>
+            <button class="tgl"    id="focus-fuel-mwc-btn" onclick="setFocusFuelMetric('mwc')">MW Capacity</button>
+          </div>
+        </div>
+        <div style="height:10px"></div>
+        <div class="chart-wrap" style="height:240px"><canvas id="ch-focus-fuel"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title" id="stages-title">Stage Breakdown by Status</div>
+        <div class="card-sub">Cycle Queue only · Project count per study stage, colored by status</div>
+        <div class="chart-wrap" style="height:240px"><canvas id="ch-focus-stages"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Row 2: Cycle Stage Attrition | Serial Queue Status Distribution -->
+    <div class="g2">
+      <div class="card">
+        <div class="card-title" id="attrition-title">Stage Attrition</div>
+        <div class="card-sub">Cycle Queue only · Projects reaching each study stage or beyond · RRI folded into Application Review</div>
+        <div class="chart-wrap" style="height:240px"><canvas id="ch-focus-attrition"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title" id="serial-status-title">Serial Queue — Status by Type</div>
+        <div class="card-sub">Serial Queue only · Legacy vs Expedited project counts by status for selected TO</div>
+        <div class="chart-wrap" style="height:240px"><canvas id="ch-focus-serial-status"></canvas><div id="ch-focus-serial-nd" class="no-data" style="display:none">No serial queue data for this TO</div></div>
+      </div>
+    </div>
+
+    <!-- Portfolio evolution fuel mix for focused TO -->
+    <div class="card">
+      <div class="card-hdr">
+        <div>
+          <div class="card-title" id="focus-portf-title">Portfolio Evolution — Fuel Mix</div>
+          <div class="card-sub" style="margin-bottom:0">Generation mix evolution for the selected TO</div>
+        </div>
+        <div class="tgl-grp">
+          <button class="tgl on" id="focus-portf-mwe-btn" onclick="setFocusPortfMetric('mwe')">MW Energy</button>
+          <button class="tgl"    id="focus-portf-mwc-btn" onclick="setFocusPortfMetric('mwc')">MW Capacity</button>
+        </div>
+      </div>
+      <div style="height:12px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#10b981;margin-bottom:4px">🟢 In-Service <span class="info-tip">i<span class="tip-popup">Fuel mix of this TO's generators currently in commercial operation. This is the baseline of what they have already built through the interconnection process.</span></span></div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:10px">Current operational generators</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="ch-focus-portf-is"></canvas><div id="ch-focus-portf-is-nd" class="no-data" style="display:none">No In-Service data</div></div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#f59e0b;margin-bottom:4px">🔶 In Service + EP + UC <span class="info-tip">i<span class="tip-popup">Adds this TO's projects with executed EP agreements and those Under Construction — generators that will likely come online within the next 1–3 years.</span></span></div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:10px">Near-term committed pipeline</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="ch-focus-portf-prog"></canvas><div id="ch-focus-portf-prog-nd" class="no-data" style="display:none">No data</div></div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#2563eb;margin-bottom:4px">🔵 Full Potential <span class="info-tip">i<span class="tip-popup">Adds all of this TO's Active (In Study) projects — shows the maximum fuel mix if every project in the queue succeeds, including those still in interconnection studies.</span></span></div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:10px">In Service + EP + UC + Active</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="ch-focus-portf-all"></canvas><div id="ch-focus-portf-all-nd" class="no-data" style="display:none">No data</div></div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /tab-focus -->
+
+  <!-- ═══ TAB: TO Comparison ═══ -->
+  <div class="tab-pane" id="tab-compare">
+    <div class="g2">
+      <div class="card">
+        <div class="card-title">Projects by Transmission Owner <span class="info-tip">i<span class="tip-popup">Stacked count of Active, EP/UC, and Withdrawn projects per TO in the selected queue view. Longer bars indicate more queue activity; the green/amber segment shows how much is progressing vs. the red Withdrawn portion.</span></span></div>
+        <div class="card-sub">Stacked: Active · EP/UC · Withdrawn</div>
+        <div class="chart-wrap" style="height:310px"><canvas id="ch-to-count"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Withdrawal Rate by Transmission Owner <span class="info-tip">i<span class="tip-popup">Percentage of each TO's projects that have been withdrawn from the interconnection queue. Lower rates indicate stronger project viability and developer commitment within that TO's territory.</span></span></div>
+        <div class="card-sub">% of projects withdrawn — lower is better</div>
+        <div class="chart-wrap" style="height:310px"><canvas id="ch-to-wd"></canvas></div>
+      </div>
+    </div>
+    <div class="g2">
+      <div class="card">
+        <div class="card-title">Fuel Mix by Transmission Owner <span class="info-tip">i<span class="tip-popup">Count of progressing projects (Active + EP/UC) per TO grouped into six fuel categories. Shows each TO's specialization — whether they lean toward solar, wind, gas, or storage interconnection.</span></span></div>
+        <div class="card-sub">Progressing projects (Active + EP/UC) broken down by fuel type</div>
+        <div class="chart-wrap" style="height:330px"><canvas id="ch-to-fuel"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">TC1 Graduation Rate by Transmission Owner <span class="info-tip">i<span class="tip-popup">Share of each TO's TC1 cycle projects that advanced to EP or UC status — a proxy for study success rate. Green ≥ 30%, Amber ≥ 15%, Red &lt; 15%. Only TOs with at least 3 TC1 projects are shown. Always uses TC1 data regardless of queue filter.</span></span></div>
+        <div class="card-sub">% of TC1 projects that reached EP / UC status · green ≥ 30% · amber ≥ 15% · red &lt; 15%</div>
+        <div class="chart-wrap" style="height:330px"><canvas id="ch-to-grad"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Active MW Energy by Transmission Owner <span class="info-tip">i<span class="tip-popup">Total MW Energy of currently Active (In Study) projects per TO, sorted descending. Reflects the scale of each TO's ongoing interconnection study workload.</span></span></div>
+      <div class="card-sub">MW Energy of currently active projects</div>
+      <div class="chart-wrap" style="height:210px"><canvas id="ch-to-mw"></canvas></div>
+    </div>
+  </div><!-- /tab-compare -->
+
+  <!-- ═══ TAB: Project Table ═══ -->
+  <div class="tab-pane" id="tab-projects">
+    <div class="card">
+      <!-- Table-local filters -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div class="card-title" style="margin:0;white-space:nowrap">Project List</div>
+        <input type="text" class="srch" id="srch" placeholder="Search ID, Name, Developer…">
+        <div class="tbl-filters">
+          <select class="ctrl-sel" id="tbl-to"   onchange="buildTable()"><option value="ALL">All TOs</option></select>
+          <select class="ctrl-sel" id="tbl-fuel" onchange="buildTable()"><option value="ALL">All Fuels</option></select>
+          <select class="ctrl-sel" id="tbl-stat" onchange="buildTable()">
+            <option value="ALL">All Statuses</option>
+            <option>Active</option><option>EP</option><option>UC</option><option>UC-ISP</option><option>Withdrawn</option>
+          </select>
+        </div>
+        <span id="proj-ct" style="font-size:11px;color:#94a3b8;white-space:nowrap"></span>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th onclick="sortTbl(0)">Project ID ↕</th>
+            <th onclick="sortTbl(1)">Cycle ↕</th>
+            <th onclick="sortTbl(2)">Stage ↕</th>
+            <th onclick="sortTbl(3)">Status ↕</th>
+            <th onclick="sortTbl(4)">Name</th>
+            <th onclick="sortTbl(5)">Transmission Owner ↕</th>
+            <th onclick="sortTbl(6)">Fuel ↕</th>
+            <th onclick="sortTbl(7)">State ↕</th>
+            <th onclick="sortTbl(8)" style="text-align:right">MW Energy ↕</th>
+            <th onclick="sortTbl(9)" style="text-align:right">MW Capacity ↕</th>
+            <th onclick="sortTbl(10)">Submitted ↕</th>
+          </tr></thead>
+          <tbody id="proj-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /tab-projects -->
+
+</div><!-- /content -->
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════
+const STAGE_ORDER = [
+  'APPLICATION PHASE','APPLICATION REVIEW',
+  'PHASE 1','DP1','PHASE 2','DP2','PHASE 3','DP3','FINAL AGREEMENT'
+];
+// RRI APPLICATION REVIEW is folded into APPLICATION REVIEW (sub-path, not a distinct pipeline stage)
+const FUNNEL_STAGES = STAGE_ORDER;
+const STAGE_TYPE = {
+  'APPLICATION PHASE':'app','APPLICATION REVIEW':'app',
+  'PHASE 1':'study','DP1':'dp','PHASE 2':'study','DP2':'dp',
+  'PHASE 3':'study','DP3':'dp','FINAL AGREEMENT':'final'
+};
+const STAGE_ICON  = { app:'📋', study:'🔬', dp:'🔀', final:'✍️' };
+const STAGE_SHORT = {
+  'APPLICATION PHASE':'App Phase','APPLICATION REVIEW':'App Review',
+  'PHASE 1':'Phase 1','DP1':'DP1',
+  'PHASE 2':'Phase 2','DP2':'DP2','PHASE 3':'Phase 3','DP3':'DP3',
+  'FINAL AGREEMENT':'Final Agmt'
+};
+const FUEL_PAL = [
+  '#3b82f6','#22c55e','#f97316','#8b5cf6','#ec4899','#14b8a6',
+  '#f59e0b','#6366f1','#84cc16','#06b6d4','#a855f7','#ef4444',
+  '#10b981','#f43f5e','#0ea5e9'
+];
+const STATUS_COL = {
+  Active:'#22c55e', EP:'#f59e0b', UC:'#8b5cf6', 'UC-ISP':'#06b6d4',
+  'In Service':'#10b981', Suspended:'#94a3b8', Withdrawn:'#ef4444'
+};
+// Serial status → normalised status
+const SERIAL_STATUS_MAP = {
+  'Active':'Active',
+  'Engineering and Procurement':'EP',
+  'Confirmed':'EP',
+  'Under Construction':'UC',
+  'Partially in Service - Under Construction':'UC',
+  'In Service':'In Service',
+  'Suspended':'Suspended',
+  'Withdrawn':'Withdrawn',
+  'Retracted':'Withdrawn',
+  'Annulled':'Withdrawn',
+  'Canceled':'Withdrawn',
+  'Deactivated':'Withdrawn',
+  'NSP':'Withdrawn'
+};
+
+// Disable datalabels globally by default — enable per-chart
+Chart.register(ChartDataLabels);
+Chart.defaults.set('plugins.datalabels', { display: false });
+
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let RAW = [], SERIAL_RAW = [], charts = {}, selCycle = 'ALL', selTO = '';
+let fuelMetric       = 'mwe';
+let focusFuelMetric  = 'mwe';
+let giQueueFuelMetric = 'mwe';   // shared toggle for GI Queue portfolio charts
+let focusPortfMetric  = 'mwe';   // toggle for TO Focus portfolio charts
+let sortCol = 0, sortAsc = true, tblData = [];
+
+// ═══════════════════════════════════════════════════════════
+// FILE LOAD
+// ═══════════════════════════════════════════════════════════
+function readExcel(file, cb) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const wb  = XLSX.read(ev.target.result, { type:'binary', cellDates:true });
+    const sn  = wb.SheetNames.find(s=>s.toLowerCase().includes('data')) || wb.SheetNames[0];
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval:'' });
+    cb(raw.map(r => {
+      const n = {};
+      for (const [k,v] of Object.entries(r)) { n[k.trim()] = typeof v==='string'?v.trim():v; }
+      return n;
+    }));
+  };
+  reader.readAsBinaryString(file);
+}
+
+// ── Cycle file ──────────────────────────────────────────────
+document.getElementById('fi-cycle').addEventListener('change', function(e) {
+  const file = e.target.files[0]; if (!file) return;
+  readExcel(file, rows => {
+    RAW = rows.map(r => {
+      if (r['Stage']) r['Stage'] = String(r['Stage']).toUpperCase().trim();
+      r['_source'] = 'cycle';
+      r['_proj_date'] = r['Requested In-Service Date'] || r['In Service Date'] ||
+                        r['Proposed In-Service Date'] || r['In-Service Date'] || '';
+      return r;
+    });
+    document.getElementById('file-lbl-cycle').textContent = '✓ ' + file.name;
+    document.getElementById('file-lbl-cycle').classList.add('loaded');
+    document.getElementById('btn-cycle').classList.add('loaded');
+    initDash();
+  });
+  this.value = '';
+});
+
+// ── Serial file ─────────────────────────────────────────────
+document.getElementById('fi-serial').addEventListener('change', function(e) {
+  const file = e.target.files[0]; if (!file) return;
+  readExcel(file, rows => {
+    SERIAL_RAW = parseSerialData(rows);
+    const _expCt = SERIAL_RAW.filter(r=>r['Cycle']==='Expedited').length;
+    const _legCt = SERIAL_RAW.filter(r=>r['Cycle']==='Legacy').length;
+    const _lbl = _legCt > 0 ? `${_legCt} Legacy + ${_expCt} Expedited` : `${_expCt} Expedited`;
+    document.getElementById('file-lbl-serial').textContent = '✓ ' + file.name + ' (' + _lbl + ' projects)';
+    document.getElementById('file-lbl-serial').classList.add('loaded');
+    document.getElementById('btn-serial').classList.add('loaded');
+    initDash();
+  });
+  this.value = '';
+});
+
+// ── Parse & normalise serial data ───────────────────────────
+// Cycle classification:
+//   AE1, AE2, AF1, AF2, AG1 → Expedited
+//   AH+ (3-char prefix >= 'AH') → Obsolete (excluded)
+//   Everything else (pre-AE batches: AA1, AB1...AD1, single-letter A01 etc.) → Legacy
+function parseSerialData(rows) {
+  const EXPEDITED_PREFIXES = new Set(['AE1','AE2','AF1','AF2','AG1']);
+
+  return rows
+    .filter(r => {
+      if ((r['Project Type']||'') !== 'Generation Interconnection') return false;
+      const pid = String(r['Project ID']||'');
+      if (/moved to TC[12]/i.test(pid)) return false; // already in cycle file
+      // Determine batch prefix
+      const m3 = pid.match(/^([A-Z]{2}\d)/);
+      if (m3) {
+        const pre3 = m3[1]; // e.g. 'AE1', 'AH2'
+        // Exclude AH2+ (obsolete batches — lexicographically >= 'AH')
+        if (!EXPEDITED_PREFIXES.has(pre3) && pre3 >= 'AH') return false;
+      }
+      // Single-letter or two-letter-no-digit prefix → Legacy — keep
+      return true;
+    })
+    .map(r => {
+      const pid = String(r['Project ID']||'').split(/\s*-\s*moved/i)[0].trim();
+      const m3  = pid.match(/^([A-Z]{2}\d)/);
+      const cycleType = m3 && EXPEDITED_PREFIXES.has(m3[1]) ? 'Expedited' : 'Legacy';
+      const rawStatus = String(r['Status']||'');
+      return {
+        'Project ID':         pid,
+        'Name':               r['Name'] || r['Commercial Name'] || '',
+        'Cycle':              cycleType,
+        'Stage':              '',
+        'Status':             SERIAL_STATUS_MAP[rawStatus] || 'Withdrawn',
+        'Transmission Owner': r['Transmission Owner'] || '',
+        'Fuel':               r['Fuel'] || '',
+        'MW Energy':          parseFloat(r['MW Energy'])  || 0,
+        'MW Capacity':        parseFloat(r['MW Capacity'])|| 0,
+        'Submitted Date':     r['Submitted Date'] || '',
+        'Withdrawn Remarks':  r['Withdrawn Remarks'] || '',
+        'State':              r['State'] || '',
+        '_source':            'serial',
+        '_raw_status':        rawStatus,
+        '_proj_date':         r['Projected In Service Date'] || r['In Service Date'] ||
+                              r['Requested In Service Date'] || ''
+      };
+    });
+}
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+function initDash() {
+  const hasAny = RAW.length || SERIAL_RAW.length;
+  if (!hasAny) return;
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('ctrl-bar').style.display = 'flex';
+  document.getElementById('tab-nav').style.display = 'flex';
+
+  // Queue buttons: ALL | SERIAL (Legacy+Expedited, only when serial loaded) | TC1 | TC2
+  const queueButtons = ['ALL', ...(SERIAL_RAW.length ? ['SERIAL'] : []), 'TC1', 'TC2'];
+  if (!queueButtons.includes(selCycle)) selCycle = 'ALL';
+  const cb = document.getElementById('cyc-btns');
+  cb.innerHTML = '';
+  queueButtons.forEach(c => {
+    const btn = document.createElement('button');
+    const isSerial = c === 'SERIAL';
+    btn.className = 'cyc-btn' + (c === selCycle ? ' on' : '');
+    btn.textContent = isSerial ? '⚡ SERIAL' : c;
+    const serialOn  = 'background:#7c3aed;color:white;border-color:#7c3aed';
+    const serialOff = 'border-color:#7c3aed;color:#7c3aed';
+    if (isSerial) btn.style.cssText = (c === selCycle) ? serialOn : serialOff;
+    btn.onclick = () => {
+      selCycle = c;
+      document.querySelectorAll('.cyc-btn').forEach(b => {
+        b.classList.remove('on');
+        if (b.textContent.includes('SERIAL')) b.style.cssText = serialOff;
+      });
+      btn.classList.add('on');
+      if (isSerial) btn.style.cssText = serialOn;
+      renderAll();
+    };
+    cb.appendChild(btn);
+  });
+
+  // Combined TO list from both sources
+  const combined = [...RAW, ...SERIAL_RAW];
+  const tos  = [...new Set(combined.map(r=>r['Transmission Owner']).filter(Boolean))].sort();
+  const ftSel = document.getElementById('focus-to-sel');
+  const prevTO = selTO;
+  ftSel.innerHTML = '<option value="">— select a TO —</option>';
+  tos.forEach(t => {
+    const o = document.createElement('option');
+    o.value = o.textContent = t;
+    if (t === (prevTO || 'Dominion')) o.selected = true;
+    ftSel.appendChild(o);
+  });
+  selTO = ftSel.value || (tos.includes('Dominion')?'Dominion':tos[0]||'');
+  ftSel.value = selTO;
+  updateFocusTabLabel(selTO);
+
+  // Table dropdowns
+  const tblTo = document.getElementById('tbl-to');
+  tblTo.innerHTML = '<option value="ALL">All TOs</option>';
+  tos.forEach(t => { const o=document.createElement('option'); o.value=o.textContent=t; tblTo.appendChild(o); });
+
+  const fuels = [...new Set(combined.map(r=>r['Fuel']).filter(Boolean))].sort();
+  const tblFuel = document.getElementById('tbl-fuel');
+  tblFuel.innerHTML = '<option value="ALL">All Fuels</option>';
+  fuels.forEach(f => { const o=document.createElement('option'); o.value=o.textContent=f; tblFuel.appendChild(o); });
+
+  document.getElementById('srch').oninput = buildTable;
+
+  renderAll();
+}
+
+// ═══════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════
+// Combined data respecting QUEUE button selection
+function getCycleData() {
+  if (selCycle === 'SERIAL') return SERIAL_RAW;
+  const base = (selCycle === 'TC1' || selCycle === 'TC2') ? RAW.filter(r => r['Cycle'] === selCycle) : RAW;
+  if (selCycle === 'ALL' && SERIAL_RAW.length) return [...base, ...SERIAL_RAW];
+  return base;
+}
+// Cycle-only data — NEVER includes serial; used exclusively for Cycle Overview tab
+function getCycleOnlyData() {
+  if (selCycle === 'TC1' || selCycle === 'TC2') return RAW.filter(r => r['Cycle'] === selCycle);
+  return RAW; // ALL or SERIAL → show all cycle data (serial excluded by design)
+}
+function hasSerialInView() { return SERIAL_RAW.length && (selCycle === 'ALL' || selCycle === 'SERIAL'); }
+function grp(arr,key)     { return arr.reduce((a,r)=>{ const k=r[key]||'Unknown'; (a[k]=a[k]||[]).push(r); return a; }, {}); }
+function sumMW(arr,col)   { col=col||'MW Energy'; return arr.reduce((s,r)=>s+(parseFloat(r[col])||0),0); }
+function pct(n,d)         { return d ? Math.round(n/d*100)+'%' : '0%'; }
+function fmtN(n)          { return n>=1000 ? (n/1000).toFixed(1)+'k' : Math.round(n).toString(); }
+function fmtMW(n)         { return n>=1000 ? (n/1000).toFixed(1)+' GW' : Math.round(n)+' MW'; }
+function fmtE(n)          { return n>=1000 ? (n/1000).toFixed(1)+' GW Energy' : Math.round(n)+' MW Energy'; }
+function normalizeStage(s) { const u=(s||'').toUpperCase(); return u==='RRI APPLICATION REVIEW'?'APPLICATION REVIEW':u; }
+function stageIdx(s)      { return STAGE_ORDER.indexOf(normalizeStage(s)); }
+function dc(id)           { if(charts[id]){charts[id].destroy();delete charts[id];} }
+function isProgressing(r) { return ['Active','EP','UC','UC-ISP','In Service','Suspended'].includes(r['Status']); }
+// Info tooltip helper — returns an ℹ badge with hover popup
+function tip(text) { return `<span class="info-tip">i<span class="tip-popup">${text}</span></span>`; }
+
+// ═══════════════════════════════════════════════════════════
+// TAB SWITCH
+// ═══════════════════════════════════════════════════════════
+function swTab(id, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('on'));
+  document.getElementById('tab-'+id).classList.add('on');
+  btn.classList.add('on');
+}
+
+// ═══════════════════════════════════════════════════════════
+// TOGGLE HANDLERS
+// ═══════════════════════════════════════════════════════════
+function setFuelMetric(v) {
+  fuelMetric = v;
+  document.getElementById('fuel-mwe-btn').classList.toggle('on', v==='mwe');
+  document.getElementById('fuel-mwc-btn').classList.toggle('on', v==='mwc');
+  const col = v==='mwe' ? 'MW Energy' : 'MW Capacity';
+  document.getElementById('fuel-sub').textContent = col + ' of progressing projects by fuel type';
+  renderFuelDonut(getCycleOnlyData(), 'ch-fuel-ov');
+}
+function setFocusFuelMetric(v) {
+  focusFuelMetric = v;
+  document.getElementById('focus-fuel-mwe-btn').classList.toggle('on', v==='mwe');
+  document.getElementById('focus-fuel-mwc-btn').classList.toggle('on', v==='mwc');
+  document.getElementById('focus-fuel-sub').textContent =
+    (v==='mwe' ? 'MW Energy' : 'MW Capacity') + ' of active + EP/UC projects by fuel type';
+  if(selTO) renderFuelDonut(getCycleData().filter(r=>r['Transmission Owner']===selTO), 'ch-focus-fuel', focusFuelMetric);
+}
+function setFocusTO(to) {
+  selTO = to;
+  updateFocusTabLabel(to);
+  renderFocus(getCycleData());
+}
+function updateFocusTabLabel(to) {
+  document.getElementById('focus-tab-btn').textContent = to ? `🏢 ${to} Focus` : '🏢 TO Focus';
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER ALL
+// ═══════════════════════════════════════════════════════════
+function renderAll() {
+  const cycleData = getCycleOnlyData(); // Cycle Overview — never serial
+  const allData   = getCycleData();     // GI Queue, TO Focus, Comparison, Table
+  renderOverview(cycleData);
+  renderGIQueue(allData);
+  renderFocus(allData);
+  renderCompare(allData);
+  buildTable();
+}
+
+// ═══════════════════════════════════════════════════════════
+// OVERVIEW
+// ═══════════════════════════════════════════════════════════
+function renderOverview(data) {
+  // data is always cycle-only (getCycleOnlyData) — pipeline/funnel always visible
+  renderKPIs(data, 'kpi-ov', false);
+  document.getElementById('card-pipeline').style.display = '';
+  document.getElementById('card-funnel').style.display   = '';
+  document.getElementById('card-serial-note').style.display = 'none';
+  renderPipeline(data);
+  renderFunnel(data);
+  renderStatusDonut(data);
+  renderFuelDonut(data, 'ch-fuel-ov');
+  renderWdReasons(data);
+}
+
+// ── KPI Cards ──────────────────────────────────────────────
+function renderKPIs(data, elId, isFocus) {
+  const total    = data.length;
+  const active   = data.filter(r=>r['Status']==='Active');
+  const ep       = data.filter(r=>r['Status']==='EP');
+  const uc       = data.filter(r=>['UC','UC-ISP'].includes(r['Status']));
+  const inSvc    = data.filter(r=>r['Status']==='In Service');
+  const susp     = data.filter(r=>r['Status']==='Suspended');
+  const wd       = data.filter(r=>r['Status']==='Withdrawn');
+  const aMW      = sumMW(active);
+  const ucMW     = sumMW(uc);
+  const epMW     = sumMW(ep);
+  const isMW     = sumMW(inSvc);
+  const wdR      = total ? Math.round(wd.length/total*100) : 0;
+  const progMW   = aMW + ucMW + epMW + isMW + sumMW(susp);
+  const showIS   = inSvc.length > 0;
+  const cls      = 'kpi' + (isFocus?' focused':'');
+  const gridId   = elId + '-grid';
+
+  // Use 6 tiles if In Service present, otherwise 5
+  const el = document.getElementById(elId);
+  el.className = showIS ? 'g6' : 'g5';
+
+  el.innerHTML = `
+    <div class="${cls}"><div class="kv cb">${fmtN(total)}</div>
+      <div class="kt">Total Projects${tip('All projects in the current queue view — Active, EP, UC, In Service, Suspended, and Withdrawn combined.')}</div>
+      <div class="ks cs">${fmtE(sumMW(data))} queue</div>
+      <div class="kbar"><div class="kbar-f" style="width:100%;background:#2563eb"></div></div></div>
+    <div class="${cls}"><div class="kv cg">${fmtN(active.length)}</div>
+      <div class="kt">Active (In Study)${tip('Projects currently progressing through PJM interconnection studies — Phase 1, 2, or 3 and associated Decision Points.')}</div>
+      <div class="ks cg">${fmtE(aMW)}</div>
+      <div class="kbar"><div class="kbar-f" style="width:${total?active.length/total*100:0}%;background:#22c55e"></div></div></div>
+    <div class="${cls}"><div class="kv ca">${fmtN(ep.length)}</div>
+      <div class="kt">EP (Exec. Agreement)${tip('Projects that completed all study phases and signed an Engineering &amp; Procurement agreement with their Transmission Owner.')}</div>
+      <div class="ks ca">${fmtE(epMW)}</div>
+      <div class="kbar"><div class="kbar-f" style="width:${total?ep.length/total*100:0}%;background:#f59e0b"></div></div></div>
+    <div class="${cls}"><div class="kv" style="color:#8b5cf6">${fmtN(uc.length)}</div>
+      <div class="kt">Under Construction${tip('Projects with a signed Facilities Agreement currently building interconnection equipment to connect to the PJM grid.')}</div>
+      <div class="ks" style="color:#8b5cf6">${fmtE(ucMW)}</div>
+      <div class="kbar"><div class="kbar-f" style="width:${total?uc.length/total*100:0}%;background:#8b5cf6"></div></div></div>
+    ${showIS ? `<div class="${cls}"><div class="kv" style="color:#10b981">${fmtN(inSvc.length)}</div>
+      <div class="kt">In Service${tip('Projects that achieved commercial operation and are actively generating electricity on the PJM grid.')}</div>
+      <div class="ks" style="color:#10b981">${fmtE(isMW)}</div>
+      <div class="kbar"><div class="kbar-f" style="width:${total?inSvc.length/total*100:0}%;background:#10b981"></div></div></div>` : ''}
+    <div class="${cls}"><div class="kv cp">${fmtMW(progMW)}</div>
+      <div class="kt">Progressing MW Energy${tip('Total MW Energy of all non-withdrawn projects: Active + EP + UC + In Service + Suspended. Represents the full pipeline working toward commercial operation.')}</div>
+      <div class="ks cp">Active: ${fmtMW(aMW)} · EP: ${fmtMW(epMW)} · UC: ${fmtMW(ucMW)}${showIS?' · InSvc: '+fmtMW(isMW):''}</div>
+      <div class="kbar"><div class="kbar-f" style="width:${sumMW(data)?progMW/sumMW(data)*100:0}%;background:#7c3aed"></div></div></div>`;
+}
+
+// ── Pipeline ────────────────────────────────────────────────
+function renderPipeline(data) {
+  const stats = {};
+  STAGE_ORDER.forEach(s=>stats[s]={active:0,epuc:0,wd:0,total:0});
+  data.forEach(r=>{
+    const s=normalizeStage(r['Stage']);
+    if(stats[s]){
+      stats[s].total++;
+      if(r['Status']==='Active')                         stats[s].active++;
+      else if(['EP','UC','UC-ISP'].includes(r['Status']))stats[s].epuc++;
+      else if(r['Status']==='Withdrawn')                 stats[s].wd++;
+    }
+  });
+  let html='';
+  STAGE_ORDER.forEach((stage,i)=>{
+    const st=stats[stage], tp=STAGE_TYPE[stage], ic=STAGE_ICON[tp];
+    html+=`<div class="p-col">
+      ${i<STAGE_ORDER.length-1?'<div class="p-line"></div>':''}
+      <div class="p-node p-${tp==='app'?'app':tp==='study'?'study':tp==='dp'?'dp':'final'}" title="${stage}">${ic}</div>
+      <div class="p-name">${STAGE_SHORT[stage]}</div>
+      <div class="p-stats">
+        ${st.total===0?'<span style="color:#e2e8f0">—</span>':''}
+        ${st.active>0?`<span class="p-active">${st.active} Active</span><br>`:''}
+        ${st.epuc>0?`<span class="p-epuc">${st.epuc} EP/UC</span><br>`:''}
+        ${st.wd>0?`<span class="p-wd">↩ ${st.wd} WD</span>`:''}
+      </div></div>`;
+  });
+  document.getElementById('pipeline').innerHTML=html;
+}
+
+// ── Status Donut ────────────────────────────────────────────
+function renderStatusDonut(data) {
+  dc('status');
+  const allLabels = ['Active','EP','UC','UC-ISP','In Service','Suspended','Withdrawn'];
+  const labels = allLabels.filter(s=>data.some(r=>r['Status']===s));
+  const vals   = labels.map(s=>data.filter(r=>r['Status']===s).length);
+  const total  = vals.reduce((a,b)=>a+b,0);
+  const colors = labels.map(s=>STATUS_COL[s]);
+
+  const ctx = document.getElementById('ch-status').getContext('2d');
+  charts['status'] = new Chart(ctx, {
+    type:'doughnut',
+    data:{ labels, datasets:[{ data:vals, backgroundColor:colors, borderWidth:2, borderColor:'#fff' }] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{
+          position:'right',
+          labels:{
+            font:{size:11}, padding:12, usePointStyle:true,
+            generateLabels: c => c.data.labels.map((lbl,i)=>{
+              const v = c.data.datasets[0].data[i];
+              const p = total ? Math.round(v/total*100) : 0;
+              return {
+                text: `${lbl}: ${v}  (${p}%)`,
+                fillStyle:   c.data.datasets[0].backgroundColor[i],
+                strokeStyle: '#fff', lineWidth:2, hidden:false, index:i
+              };
+            })
+          }
+        },
+        datalabels:{ display: false },
+        tooltip:{ callbacks:{ label:c=>{ const p=total?Math.round(c.raw/total*100):0; return ` ${c.label}: ${c.raw}  (${p}%)`; }}}
+      }
+    }
+  });
+}
+
+// ── Fuel Donut (MWE/MWC toggle, no segment labels) ──────────
+function renderFuelDonut(data, cid, metricOverride) {
+  dc(cid);
+  const prog    = data.filter(isProgressing);
+  const metric  = metricOverride || fuelMetric;
+  const mwcol   = metric==='mwe' ? 'MW Energy' : 'MW Capacity';
+  const fgrp    = grp(prog,'Fuel');
+  const entries = Object.entries(fgrp)
+    .map(([f,rows])=>[f, Math.round(sumMW(rows,mwcol))])
+    .filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+  if(!entries.length) return;
+
+  const total = entries.reduce((s,e)=>s+e[1],0);
+  const ctx = document.getElementById(cid)?.getContext('2d');
+  if(!ctx) return;
+
+  charts[cid] = new Chart(ctx, {
+    type:'doughnut',
+    data:{
+      labels:entries.map(e=>e[0]),
+      datasets:[{ data:entries.map(e=>e[1]), backgroundColor:FUEL_PAL, borderWidth:2, borderColor:'#fff' }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{
+          position:'right',
+          labels:{
+            font:{size:10}, padding:7, usePointStyle:true,
+            generateLabels: c => c.data.labels.map((l,i)=>{
+              const v = c.data.datasets[0].data[i];
+              const p = total ? Math.round(v/total*100) : 0;
+              return {
+                text: `${l}: ${fmtMW(v)}  (${p}%)`,
+                fillStyle:   c.data.datasets[0].backgroundColor[i],
+                strokeStyle: '#fff', lineWidth:2, hidden:false, index:i
+              };
+            })
+          }
+        },
+        datalabels:{ display: false },
+        tooltip:{
+          callbacks:{
+            label:c=>{ const p=total?Math.round(c.raw/total*100):0; return ` ${c.label}: ${fmtMW(c.raw)}  (${p}%)`; }
+          }
+        }
+      }
+    }
+  });
+}
+
+// ── Stage Funnel (shared by Overview + Focus) ──────────────
+function renderFunnel(data, canvasId) {
+  canvasId = canvasId || 'ch-funnel';
+  dc(canvasId);
+  const counts = FUNNEL_STAGES.map(s => {
+    const idx = stageIdx(s);
+    return data.filter(r=>{ const ri=stageIdx(r['Stage']); return ri>=0&&ri>=idx; }).length;
+  });
+  const ctx = document.getElementById(canvasId)?.getContext('2d');
+  if(!ctx) return;
+  charts[canvasId] = new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:FUNNEL_STAGES.map(s=>STAGE_SHORT[s]),
+      datasets:[{ data:counts, borderRadius:4, borderWidth:0,
+        backgroundColor:FUNNEL_STAGES.map(s=>{
+          const t=STAGE_TYPE[s];
+          return t==='study'?'rgba(59,130,246,0.7)':t==='dp'?'rgba(139,92,246,0.6)':
+                 t==='final'?'rgba(245,158,11,0.7)':'rgba(148,163,184,0.5)';
+        })
+      }]
+    },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.raw} projects reached this stage`}} },
+      scales:{ x:{grid:{color:'#f1f5f9'},ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}}} }
+    }
+  });
+}
+
+// ── Withdrawal Reasons ──────────────────────────────────────
+function renderWdReasons(data) {
+  dc('wdr');
+  const wd = data.filter(r=>r['Status']==='Withdrawn');
+  const g  = grp(wd,'Withdrawn Remarks');
+  const entries = Object.entries(g).filter(([k])=>k&&k!=='Unknown'&&k!=='')
+    .sort((a,b)=>b[1].length-a[1].length).slice(0,7);
+  if(!entries.length){ document.getElementById('ch-wd-reasons').parentNode.innerHTML='<div class="no-data">No withdrawal data</div>'; return; }
+  const ctx = document.getElementById('ch-wd-reasons')?.getContext('2d');
+  if(!ctx) return;
+  charts['wdr'] = new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:entries.map(([k])=>k.length>32?k.slice(0,29)+'…':k),
+      datasets:[{ data:entries.map(([,v])=>v.length), backgroundColor:'#fca5a5', borderColor:'#ef4444', borderWidth:1, borderRadius:4 }]
+    },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.raw} projects`}} },
+      scales:{ x:{grid:{color:'#f1f5f9'},ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}}} }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// TO FOCUS TAB
+// ═══════════════════════════════════════════════════════════
+function renderFocus(data) {
+  if(!selTO){ document.getElementById('kpi-focus').innerHTML='<div style="grid-column:span 5;color:#94a3b8;padding:20px">Select a Transmission Owner above to view detailed stats.</div>'; return; }
+
+  // Update card titles (cycle-only vs combined labels)
+  {
+    const titles={
+      'stages-title':        [`${selTO} — Stage Breakdown  [Cycle Queue]`,   'Project count per study stage for this TO\'s cycle queue projects, colored by status. Serial queue projects have no study stages so are excluded here.'],
+      'attrition-title':     [`${selTO} — Stage Attrition  [Cycle Queue]`,   'Cumulative count of this TO\'s cycle projects that reached each study stage or beyond. Shows how many projects survive each stage transition.'],
+      'fuel-title':          [`${selTO} — Fuel Mix  [Cycle + Serial]`,        'MW Energy (or Capacity) of Active + EP/UC projects for this TO, combining both cycle and serial queue sources. Use toggle to switch metric.'],
+      'serial-status-title': [`${selTO} — Status by Type  [Serial Queue]`,    'Distribution of this TO\'s serial queue projects split between Legacy (pre-AE batches) and Expedited (AE1-AG1) by current status.'],
+      'focus-portf-title':   [`${selTO} — Portfolio Evolution  [Cycle + Serial]`, 'Three fuel mix snapshots for this TO: current In-Service generators, committed near-term pipeline (+ EP + UC), and full potential (+ Active). Combines cycle and serial sources.']
+    };
+    Object.entries(titles).forEach(([id,[txt,tipTxt]])=>{
+      const el=document.getElementById(id);
+      if(el) el.innerHTML = txt + tip(tipTxt);
+    });
+  }
+
+  const toData       = data.filter(r => r['Transmission Owner'] === selTO);
+  const toCycleData  = toData.filter(r => r['_source'] === 'cycle');  // cycle-only
+  const toSerialData = toData.filter(r => r['_source'] === 'serial'); // serial-only
+  renderKPIs(toData, 'kpi-focus', true);
+
+  // ── Fuel Mix donut (Cycle + Serial combined, top-left) ────
+  renderFuelDonut(toData, 'ch-focus-fuel', focusFuelMetric);
+
+  // ── Stage Breakdown (Cycle Queue only) ───────────────────
+  dc('focus-stages');
+  const normData  = toCycleData.map(r => ({...r, Stage: normalizeStage(r['Stage'])}));
+  const byStage   = grp(normData,'Stage');
+  const hasStages = STAGE_ORDER.filter(s => byStage[s] && byStage[s].length > 0);
+  if (hasStages.length) {
+    const ctx = document.getElementById('ch-focus-stages').getContext('2d');
+    charts['focus-stages'] = new Chart(ctx, {
+      type:'bar',
+      data:{
+        labels: hasStages.map(s => STAGE_SHORT[s]),
+        datasets:[
+          { label:'Active',    data:hasStages.map(s=>(byStage[s]||[]).filter(r=>r['Status']==='Active').length),                     backgroundColor:'#22c55e' },
+          { label:'EP/UC',     data:hasStages.map(s=>(byStage[s]||[]).filter(r=>['EP','UC','UC-ISP'].includes(r['Status'])).length), backgroundColor:'#f59e0b' },
+          { label:'Withdrawn', data:hasStages.map(s=>(byStage[s]||[]).filter(r=>r['Status']==='Withdrawn').length),                 backgroundColor:'#fca5a5' }
+        ]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{position:'top',labels:{font:{size:10},usePointStyle:true}} },
+        scales:{ x:{stacked:true,ticks:{font:{size:10}}}, y:{stacked:true,grid:{color:'#f1f5f9'}} }
+      }
+    });
+  }
+
+  // ── Stage Attrition Funnel (Cycle Queue only) ─────────────
+  renderFunnel(toCycleData, 'ch-focus-attrition');
+
+  // ── Serial Queue Status by Type ───────────────────────────
+  renderSerialQueueStatus(toSerialData, 'ch-focus-serial-status', 'ch-focus-serial-nd');
+
+  // ── Portfolio Evolution (Cycle + Serial combined) ─────────
+  renderFocusPortfolioCharts(toData);
+}
+
+// direction: 'high' = higher is better, 'low' = lower is better, null = neutral
+
+// ── Fuel normalisation ──────────────────────────────────────
+function normFuel(f) {
+  if (!f) return 'Other';
+  const fu = String(f).toLowerCase().replace(/;/g,','); // handle both , and ; separators
+  if (fu.includes('solar') && (fu.includes('storage') || fu.includes('battery'))) return 'Solar+Storage';
+  if (fu.includes('solar'))   return 'Solar';
+  if (fu.includes('storage') || fu.includes('battery')) return 'Storage';
+  if (fu.includes('offshore') || fu.includes('wind'))   return 'Wind';
+  if (fu.includes('gas') || fu.includes('methane'))     return 'Gas';
+  return 'Other';
+}
+const FUEL_CAT     = ['Solar','Solar+Storage','Storage','Wind','Gas','Other'];
+const FUEL_CAT_COL = { Solar:'#f59e0b', 'Solar+Storage':'#10b981', Storage:'#3b82f6', Wind:'#06b6d4', Gas:'#ef4444', Other:'#94a3b8' };
+
+// ── Fuel Mix by TO ──────────────────────────────────────────
+function renderFuelMixByTO(data) {
+  dc('to-fuel');
+  const tog  = grp(data,'Transmission Owner');
+  const tos  = Object.keys(tog).sort((a,b)=>tog[b].length-tog[a].length);
+  const prog = tos.filter(t=>tog[t].some(r=>isProgressing(r)));
+
+  const datasets = FUEL_CAT
+    .map(cat=>({
+      label: cat,
+      data:  prog.map(t=>tog[t].filter(r=>isProgressing(r)&&normFuel(r['Fuel'])===cat).length),
+      backgroundColor: FUEL_CAT_COL[cat],
+      borderWidth:0, borderRadius:2
+    }))
+    .filter(ds=>ds.data.some(v=>v>0));
+
+  const ctx=document.getElementById('ch-to-fuel').getContext('2d');
+  charts['to-fuel']=new Chart(ctx,{
+    type:'bar',
+    data:{ labels:prog, datasets },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'top',labels:{font:{size:10},usePointStyle:true}},
+        tooltip:{mode:'index',intersect:false}
+      },
+      scales:{
+        x:{stacked:true,grid:{color:'#f1f5f9'},ticks:{font:{size:10}}},
+        y:{stacked:true,ticks:{font:{size:10},color:prog.map(t=>t===selTO?'#1d4ed8':'#475569')}}
+      }
+    }
+  });
+}
+
+// ── TC1 Graduation Rate by TO ───────────────────────────────
+function renderGraduationRate() {
+  dc('to-grad');
+  const tc1=RAW.filter(r=>r['Cycle']==='TC1');
+  if(!tc1.length){
+    document.getElementById('ch-to-grad').parentElement.innerHTML='<p style="color:#94a3b8;font-size:12px;padding:30px;text-align:center">No TC1 data available</p>';
+    return;
+  }
+  const tog1=grp(tc1,'Transmission Owner');
+  const grad=Object.entries(tog1)
+    .map(([to,rows])=>{
+      const tot=rows.length;
+      const epuc=rows.filter(r=>['EP','UC','UC-ISP'].includes(r['Status'])).length;
+      return [to,tot,epuc,tot?Math.round(epuc/tot*100):0];
+    })
+    .filter(([,tot])=>tot>=3)
+    .sort((a,b)=>b[3]-a[3]);
+
+  const ctx=document.getElementById('ch-to-grad').getContext('2d');
+  charts['to-grad']=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:grad.map(e=>e[0]),
+      datasets:[{
+        data:grad.map(e=>e[3]),
+        backgroundColor:grad.map(e=>e[0]===selTO?'#1d4ed8':e[3]>=30?'#22c55e':e[3]>=15?'#f59e0b':'#ef4444'),
+        borderRadius:4, borderWidth:0
+      }]
+    },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:c=>{
+          const d=grad[c.dataIndex];
+          return ` ${c.raw}%  (${d[2]} of ${d[1]} projects reached EP/UC)`;
+        }}}
+      },
+      scales:{
+        x:{max:100,grid:{color:'#f1f5f9'},ticks:{callback:v=>v+'%',font:{size:10}}},
+        y:{ticks:{font:{size:10},color:grad.map(e=>e[0]===selTO?'#1d4ed8':'#475569')}}
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// TO COMPARISON
+// ═══════════════════════════════════════════════════════════
+function renderCompare(data) {
+  const tog = grp(data,'Transmission Owner');
+  const tos = Object.keys(tog).sort();
+
+  // Stacked count bar
+  dc('to-count');
+  const ctx1=document.getElementById('ch-to-count').getContext('2d');
+  charts['to-count']=new Chart(ctx1,{
+    type:'bar',
+    data:{
+      labels:tos,
+      datasets:[
+        { label:'Active',    data:tos.map(t=>tog[t].filter(r=>r['Status']==='Active').length),                     backgroundColor:'#22c55e' },
+        { label:'EP/UC',     data:tos.map(t=>tog[t].filter(r=>['EP','UC','UC-ISP'].includes(r['Status'])).length), backgroundColor:'#f59e0b' },
+        { label:'Withdrawn', data:tos.map(t=>tog[t].filter(r=>r['Status']==='Withdrawn').length),                 backgroundColor:'#fca5a5' }
+      ]
+    },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{position:'top',labels:{font:{size:10},usePointStyle:true}}, tooltip:{mode:'index',intersect:false} },
+      scales:{ x:{stacked:true,grid:{color:'#f1f5f9'}}, y:{stacked:true,ticks:{font:{size:10},color:tos.map(t=>t===selTO?'#1d4ed8':'#475569')}} }
+    }
+  });
+
+  // Withdrawal rate
+  dc('to-wd');
+  const wdE=tos.map(t=>[t,tog[t].length?Math.round(tog[t].filter(r=>r['Status']==='Withdrawn').length/tog[t].length*100):0]).sort((a,b)=>b[1]-a[1]);
+  const ctx2=document.getElementById('ch-to-wd').getContext('2d');
+  charts['to-wd']=new Chart(ctx2,{
+    type:'bar',
+    data:{
+      labels:wdE.map(e=>e[0]),
+      datasets:[{ data:wdE.map(e=>e[1]), backgroundColor:wdE.map(e=>e[0]===selTO?'#1d4ed8':'#93c5fd'), borderRadius:4, borderWidth:0 }]
+    },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.raw}% withdrawal rate`}} },
+      scales:{
+        x:{ max:100,grid:{color:'#f1f5f9'},ticks:{callback:v=>v+'%',font:{size:10}} },
+        y:{ ticks:{font:{size:10},color:wdE.map(e=>e[0]===selTO?'#1d4ed8':'#475569')} }
+      }
+    }
+  });
+
+  // Fuel Mix by TO + TC1 Graduation Rate
+  renderFuelMixByTO(data);
+  renderGraduationRate();
+
+  // Active MW bar
+  dc('to-mw');
+  const mwE=tos.map(t=>[t,Math.round(sumMW(tog[t].filter(r=>r['Status']==='Active')))]).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+  const ctx3=document.getElementById('ch-to-mw').getContext('2d');
+  charts['to-mw']=new Chart(ctx3,{
+    type:'bar',
+    data:{
+      labels:mwE.map(e=>e[0]),
+      datasets:[{ data:mwE.map(e=>e[1]), backgroundColor:mwE.map(e=>e[0]===selTO?'#1d4ed8':'#93c5fd'), borderRadius:4, borderWidth:0 }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmtMW(c.raw)} active`}} },
+      scales:{
+        x:{ ticks:{font:{size:10},color:mwE.map(e=>e[0]===selTO?'#1d4ed8':'#475569')} },
+        y:{ grid:{color:'#f1f5f9'},ticks:{callback:v=>fmtMW(v),font:{size:10}} }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// PROJECT TABLE
+// ═══════════════════════════════════════════════════════════
+function buildTable() {
+  const data   = getCycleData();
+  const q      = (document.getElementById('srch')?.value||'').toLowerCase();
+  const tblTO  = document.getElementById('tbl-to')?.value  || 'ALL';
+  const tblF   = document.getElementById('tbl-fuel')?.value|| 'ALL';
+  const tblS   = document.getElementById('tbl-stat')?.value|| 'ALL';
+
+  let rows = data.filter(r=>
+    (tblTO==='ALL' || r['Transmission Owner']===tblTO) &&
+    (tblF==='ALL'  || r['Fuel']===tblF) &&
+    (tblS==='ALL'  || r['Status']===tblS)
+  );
+  if(q) rows=rows.filter(r=>
+    (r['Project ID']+'').toLowerCase().includes(q)||
+    (r['Name']+'').toLowerCase().includes(q)||
+    (r['Developer']+'').toLowerCase().includes(q)||
+    (r['Commercial Name']+'').toLowerCase().includes(q)
+  );
+  tblData = rows;
+  sortAndRenderTable();
+}
+
+function sortTbl(col){
+  sortCol===col ? (sortAsc=!sortAsc) : (sortCol=col,sortAsc=true);
+  sortAndRenderTable();
+}
+const TCOLS=['Project ID','Cycle','Stage','Status','Name','Transmission Owner','Fuel','State','MW Energy','MW Capacity','Submitted Date'];
+function sortAndRenderTable(){
+  const key=TCOLS[sortCol];
+  const sorted=[...tblData].sort((a,b)=>{
+    const av=a[key]||'', bv=b[key]||'';
+    const an=parseFloat(av), bn=parseFloat(bv);
+    const cmp=(!isNaN(an)&&!isNaN(bn))?an-bn:String(av).localeCompare(String(bv));
+    return sortAsc?cmp:-cmp;
+  });
+  document.getElementById('proj-ct').textContent=`${sorted.length} projects`;
+  const shown=sorted.slice(0,600);
+  const isFocusTO = r => r['Transmission Owner']===selTO;
+  document.getElementById('proj-body').innerHTML=shown.map(r=>{
+    const isFocus=isFocusTO(r), st=r['Status']||'';
+    const mwe=r['MW Energy']!==''?parseFloat(r['MW Energy']).toFixed(0):'';
+    const mwc=r['MW Capacity']!==''?parseFloat(r['MW Capacity']).toFixed(0):'';
+    let sub=r['Submitted Date']; if(sub instanceof Date) sub=sub.toLocaleDateString();
+    return `<tr class="${isFocus?'focus-row':''}">
+      <td><strong>${r['Project ID']||''}</strong></td>
+      <td>${r['Cycle']||''}</td>
+      <td style="font-size:10px;color:#64748b">${r['Stage']||''}</td>
+      <td><span class="sp sp-${st.replace(/[^a-zA-Z-]/g,'')}">${st}</span></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r['Name']||''}</td>
+      <td style="${isFocus?'color:#1d4ed8;font-weight:700':''}">${r['Transmission Owner']||''}</td>
+      <td style="font-size:10px;color:#64748b">${r['Fuel']||''}</td>
+      <td>${r['State']||''}</td>
+      <td style="text-align:right;font-weight:600">${mwe}</td>
+      <td style="text-align:right">${mwc}</td>
+      <td style="font-size:10px;color:#94a3b8">${sub||''}</td>
+    </tr>`;
+  }).join('');
+  if(sorted.length>600){
+    document.getElementById('proj-body').innerHTML+=`<tr><td colspan="11" style="text-align:center;color:#94a3b8;font-size:11px;padding:12px">Showing 600 of ${sorted.length} — use filters above to narrow down</td></tr>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// GI QUEUE OVERVIEW
+// ═══════════════════════════════════════════════════════════
+
+// Fuel mix donut using normFuel categories (6 FUEL_CAT buckets)
+// metric: 'mwe' (default) or 'mwc'
+// ndId: optional companion no-data div id (canvas-safe approach)
+function renderGIFuelCategoryChart(data, cid, metric, ndId) {
+  dc(cid);
+  const canvas = document.getElementById(cid);
+  const ndEl   = ndId ? document.getElementById(ndId) : null;
+
+  // Show/hide no-data message without touching the canvas DOM node
+  if (!data.length) {
+    if (canvas) canvas.style.display = 'none';
+    if (ndEl)   ndEl.style.display = '';
+    return;
+  }
+  if (canvas) canvas.style.display = '';
+  if (ndEl)   ndEl.style.display = 'none';
+
+  const ctx = canvas?.getContext('2d');
+  if (!ctx) return;
+
+  const mwcol = (metric || 'mwe') === 'mwc' ? 'MW Capacity' : 'MW Energy';
+  const cats = {};
+  FUEL_CAT.forEach(c => { cats[c] = 0; });
+  data.forEach(r => {
+    const cat = normFuel(r['Fuel']);
+    cats[cat] = (cats[cat] || 0) + (parseFloat(r[mwcol]) || 0);
+  });
+  const labels = FUEL_CAT.filter(c => cats[c] > 0);
+  const vals   = labels.map(c => Math.round(cats[c]));
+  const colors = labels.map(c => FUEL_CAT_COL[c]);
+  const total  = vals.reduce((a, b) => a + b, 0);
+  if (!total) {
+    if (canvas) canvas.style.display = 'none';
+    if (ndEl)   { ndEl.textContent = 'No MW data'; ndEl.style.display = ''; }
+    return;
+  }
+
+  charts[cid] = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: vals, backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: {
+            font: { size: 10 }, padding: 8, usePointStyle: true,
+            generateLabels: c => c.data.labels.map((lbl, i) => {
+              const v = c.data.datasets[0].data[i];
+              const p = total ? Math.round(v / total * 100) : 0;
+              return {
+                text: `${lbl}: ${fmtMW(v)}  (${p}%)`,
+                fillStyle: c.data.datasets[0].backgroundColor[i],
+                strokeStyle: '#fff', lineWidth: 2, hidden: false, index: i
+              };
+            })
+          }
+        },
+        datalabels: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => {
+              const p = total ? Math.round(c.raw / total * 100) : 0;
+              return ` ${c.label}: ${fmtMW(c.raw)}  (${p}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderGIQueue(data) {
+  // KPI tiles — combined all queues
+  renderKPIs(data, 'kpi-gi', false);
+
+  // ── Three portfolio evolution fuel mix charts ──────────────
+  const m = giQueueFuelMetric;
+  renderGIFuelCategoryChart(
+    data.filter(r => r['Status'] === 'In Service'),
+    'ch-gi-fuel-is', m, 'ch-gi-fuel-is-nd'
+  );
+  renderGIFuelCategoryChart(
+    data.filter(r => ['In Service','EP','UC','UC-ISP'].includes(r['Status'])),
+    'ch-gi-fuel-prog', m, 'ch-gi-fuel-prog-nd'
+  );
+  renderGIFuelCategoryChart(
+    data.filter(r => ['In Service','EP','UC','UC-ISP','Active'].includes(r['Status'])),
+    'ch-gi-fuel-all', m, 'ch-gi-fuel-all-nd'
+  );
+}
+
+function setGIFuelMetric(v) {
+  giQueueFuelMetric = v;
+  document.getElementById('gi-fuel-mwe-btn').classList.toggle('on', v === 'mwe');
+  document.getElementById('gi-fuel-mwc-btn').classList.toggle('on', v === 'mwc');
+  renderGIQueue(getCycleData()); // re-render with new metric
+}
+
+function setFocusPortfMetric(v) {
+  focusPortfMetric = v;
+  document.getElementById('focus-portf-mwe-btn').classList.toggle('on', v === 'mwe');
+  document.getElementById('focus-portf-mwc-btn').classList.toggle('on', v === 'mwc');
+  if (selTO) renderFocusPortfolioCharts(getCycleData().filter(r => r['Transmission Owner'] === selTO));
+}
+
+// ── Serial Queue — Status by Type (Legacy vs Expedited) ────────
+function renderSerialQueueStatus(serialData, cid, ndId) {
+  dc(cid);
+  const canvas = document.getElementById(cid);
+  const ndEl   = ndId ? document.getElementById(ndId) : null;
+  if (!serialData.length) {
+    if (canvas) canvas.style.display = 'none';
+    if (ndEl)   ndEl.style.display = '';
+    return;
+  }
+  if (canvas) canvas.style.display = '';
+  if (ndEl)   ndEl.style.display = 'none';
+
+  const statuses  = ['Active','EP','UC','UC-ISP','In Service','Suspended','Withdrawn'];
+  const legacy    = serialData.filter(r => r['Cycle'] === 'Legacy');
+  const expedited = serialData.filter(r => r['Cycle'] === 'Expedited');
+
+  // Only show statuses that have at least one count
+  const activeStatuses = statuses.filter(s =>
+    serialData.some(r => r['Status'] === s)
+  );
+
+  const ctx = canvas?.getContext('2d');
+  if (!ctx) return;
+
+  charts[cid] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: activeStatuses,
+      datasets: [
+        {
+          label: 'Legacy',
+          data: activeStatuses.map(s => legacy.filter(r => r['Status'] === s).length),
+          backgroundColor: '#7c3aed', borderRadius: 3, borderWidth: 0
+        },
+        {
+          label: 'Expedited',
+          data: activeStatuses.map(s => expedited.filter(r => r['Status'] === s).length),
+          backgroundColor: '#c4b5fd', borderRadius: 3, borderWidth: 0
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position:'top', labels:{ font:{size:10}, usePointStyle:true } },
+        tooltip: {
+          callbacks: {
+            label: c => ` ${c.dataset.label}: ${c.raw} project${c.raw!==1?'s':''}`
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid:{ color:'#f1f5f9' }, ticks:{ font:{size:10} } },
+        y: { stacked: true, ticks:{ font:{size:10} } }
+      }
+    }
+  });
+}
+
+function renderFocusPortfolioCharts(toData) {
+  const m = focusPortfMetric;
+  renderGIFuelCategoryChart(
+    toData.filter(r => r['Status'] === 'In Service'),
+    'ch-focus-portf-is', m, 'ch-focus-portf-is-nd'
+  );
+  renderGIFuelCategoryChart(
+    toData.filter(r => ['In Service','EP','UC','UC-ISP'].includes(r['Status'])),
+    'ch-focus-portf-prog', m, 'ch-focus-portf-prog-nd'
+  );
+  renderGIFuelCategoryChart(
+    toData.filter(r => ['In Service','EP','UC','UC-ISP','Active'].includes(r['Status'])),
+    'ch-focus-portf-all', m, 'ch-focus-portf-all-nd'
+  );
+}
+</script>
+</body>
+</html>
